@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"labo/log"
+	"log"
 	"os"
 	"strings"
 )
 
 func put(filename string) {
 	fmt.Println("Put", filename)
-	log.Log("Put", filename)
+	log.Println("Put", filename)
 }
 func get(filename string) {
 	fmt.Println("Get", filename)
@@ -23,7 +24,8 @@ func info(filename string) {
 }
 
 func main() {
-	log.InitializeLog()
+	log_init.InitializeLog()
+	defer log_init.FinalizeLog()
 
 	reader := bufio.NewReader(os.Stdin)
 	for {

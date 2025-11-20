@@ -1,4 +1,4 @@
-package log
+package log_init
 
 import (
 	"log"
@@ -19,8 +19,4 @@ func InitializeLog() {
 
 func FinalizeLog() {
 	logFile.Close()
-}
-
-func Log(v ...any) {
-	log.Println(v...)
 }

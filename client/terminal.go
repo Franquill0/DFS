@@ -6,7 +6,9 @@ import (
 	"labo/commands"
 	"labo/log_init"
 	"log"
+	"net"
 	"os"
+	"strings"
 )
 
 func put(args []string) {
@@ -15,6 +17,22 @@ func put(args []string) {
 		return
 	}
 	log.Println("Put request:", args[1])
+	conn, err := net.Dial("tcp", "localhost:8080")
+	if err != nil {
+		fmt.Println("Error en conexion:", err)
+	}
+	defer conn.Close()
+	conn.Write([]byte(strings.Join(args, " ") + "\n"))
+	connReader := bufio.NewReader(conn)
+
+	response, err := connReader.ReadString('\n')
+	if err != nil {
+		fmt.Println("error en respuesta")
+		log.Println(err)
+		return
+	}
+	fmt.Println(response)
+
 }
 func get(args []string) {
 	if len(args) != 2 {
@@ -50,10 +68,10 @@ func main() {
 		"exit": exit,
 	}
 
-	reader := bufio.NewReader(os.Stdin)
+	commandReader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("> ")
-		input, _ := reader.ReadString('\n')
+		input, _ := commandReader.ReadString('\n')
 		commands.ExecCommand(input, functionMap)
 	}
 }

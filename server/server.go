@@ -3,48 +3,74 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"labo/log_init"
 	"log"
 	"net"
+	"os"
 	"strconv"
+	"strings"
+	"sync"
 )
 
-var commandsMap = map[string]func([]string, net.Conn){
-	"put":  put,
-	"get":  get,
-	"ls":   ls,
-	"info": info,
-}
+func put(args []string, conn net.Conn, reader *bufio.Reader) {
+	filename := args[1]
+	log_init.PrintAndLog("PUT request del archivo", filename, "desde", conn.RemoteAddr())
+	file, err := os.Create(filename)
+	log_init.PrintAndLogIfError(err)
+	if err != nil {
+		return
+	} else {
+		//defer os.Remove(filename)
+	}
 
-func put(args []string, conn net.Conn) {
-	log_init.PrintAndLog("Put request: " + args[1])
+	_, err = io.Copy(file, reader)
+	log_init.PrintAndLogIfError(err)
+	if err != nil {
+		return
+	}
 }
 func get(args []string, conn net.Conn) {
-	log.Println("Get request:", args[1])
+	filename := args[1]
+	log_init.PrintAndLog("GET request del archivo", filename, "desde", conn.RemoteAddr())
 }
 func ls(args []string, conn net.Conn) {
-	log.Println("Ls request:")
-	conn.Write([]byte("OK "))
+	log.Println("LS request desde", conn.RemoteAddr())
 	for file := range metadata {
-		conn.Write([]byte(file + " "))
+		fmt.Fprintf(conn, "%s ", file)
 	}
-	conn.Write([]byte("\n"))
+	fmt.Fprintf(conn, "\n")
 }
 func info(args []string, conn net.Conn) {
-	log.Println("Info request:", args[1])
+	filename := args[1]
+	log_init.PrintAndLog("INFO request del archivo", filename, "desde", conn.RemoteAddr())
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, wg *sync.WaitGroup) {
+	defer wg.Done()
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
 	line, err := reader.ReadString('\n')
+	log_init.PrintAndLogIfError(err)
 	if err != nil {
-		fmt.Println("Error leyendo comando:", err)
-		conn.Write([]byte("ERR al leer el comando!\n"))
 		return
 	}
-	execCommand(line, commandsMap, conn)
+	args := strings.Fields(line)
+	command := args[0]
+	switch command {
+	case "put":
+		put(args, conn, reader)
+	case "get":
+		get(args, conn)
+	case "ls":
+		ls(args, conn)
+	case "info":
+		info(args, conn)
+	default:
+		log_init.PrintAndLog("Comando no reconocido: ", strings.TrimSpace(line))
+	}
+
 }
 
 func main() {
@@ -55,18 +81,27 @@ func main() {
 	if err != nil {
 		log.Println(err)
 	}
-	fmt.Println("Escuchando en el puerto", port, "...")
+	log_init.PrintAndLog("Escuchando en el puerto " + strconv.Itoa(port) + "...")
+	fmt.Println("Presione ENTER para salir...")
 
-	defer ln.Close()
+	// Rutina para salir del servidor
+	go func() {
+		bufio.NewReader(os.Stdin).ReadBytes('\n')
+		log_init.PrintAndLog("Cerrando servidor...")
+		ln.Close()
+	}()
+
+	var waitingThreads sync.WaitGroup
 
 	for {
-		// Accept an incoming connection
 		conn, err := ln.Accept()
 		if err != nil {
 			log.Println(err)
+			break
 		}
+		waitingThreads.Add(1)
 
-		// Handle the connection
-		go handleConnection(conn)
+		go handleConnection(conn, &waitingThreads)
 	}
+	waitingThreads.Wait()
 }

@@ -3,11 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"labo/log_init"
-	"log"
 	"net"
 	"os"
-	"strings"
 )
 
 const serverIPPort = "192.168.18.41:8080"
@@ -17,20 +16,28 @@ func put(args []string) {
 		fmt.Println("Uso -> put <archivo>")
 		return
 	}
-	log.Println("Put request:", args[1])
+	filename := args[1]
+	file, err := os.Open(filename)
+	log_init.PrintAndLogIfError(err)
+	if err != nil {
+		return
+	} else {
+		defer file.Close()
+	}
+	log_init.PrintAndLog("PUT request del archivo", filename)
 	conn := stablishConn()
 	if conn != nil {
 		defer conn.Close()
 	}
-	conn.Write([]byte(strings.Join(args, " ") + "\n"))
-	connReader := bufio.NewReader(conn)
+	// Envío el comando con el nombre del archivo
+	fmt.Fprintf(conn, "put %s\n", filename)
 
-	response, err := connReader.ReadString('\n')
+	_, err = io.Copy(conn, file)
+	log_init.PrintAndLogIfError(err)
 	if err != nil {
-		log_init.PrintAndLogIfError(err)
 		return
 	}
-	fmt.Print(response)
+	log_init.PrintAndLog("Archivo cargado", filename)
 
 }
 func get(args []string) {
@@ -47,8 +54,12 @@ func ls(args []string) {
 	conn := stablishConn()
 	if conn != nil {
 		defer conn.Close()
+	} else {
+		log_init.PrintAndLog("Conexión fallida con el servidor")
+		return
 	}
-	conn.Write([]byte(strings.Join(args, " ") + "\n"))
+	log_init.PrintAndLog("LS request")
+	fmt.Fprintf(conn, "ls\n")
 	connReader := bufio.NewReader(conn)
 
 	response, err := connReader.ReadString('\n')
@@ -57,7 +68,6 @@ func ls(args []string) {
 		return
 	}
 	fmt.Print(response)
-
 }
 func info(args []string) {
 	if len(args) != 2 {

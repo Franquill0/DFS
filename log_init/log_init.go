@@ -29,7 +29,7 @@ func PrintAndLogIfError(err error) {
 	}
 }
 
-func PrintAndLog(s string) {
-	fmt.Println(s)
-	log.Println(s)
+func PrintAndLog(args ...any) {
+	fmt.Println(args...)
+	log.Println(args...)
 }

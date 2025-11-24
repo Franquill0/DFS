@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"labo/log_init"
+	"labo/utils"
 	"net"
 	"os"
 )
@@ -32,13 +33,15 @@ func put(args []string) {
 	// Envío el comando con el nombre del archivo
 	fmt.Fprintf(conn, "put %s\n", filename)
 
+	log_init.PrintAndLog("Enviando archivo:", filename)
+	startTime := my_time.Now()
 	_, err = io.Copy(conn, file)
 	log_init.PrintAndLogIfError(err)
 	if err != nil {
 		return
 	}
-	log_init.PrintAndLog("Archivo cargado", filename)
-
+	log_init.PrintAndLog("Archivo enviado:", filename)
+	log_init.PrintAndLog("Tiempo de subida ->", my_time.GetFormattedTime(startTime))
 }
 func get(args []string) {
 	if len(args) != 2 {

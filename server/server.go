@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"labo/log_init"
+	"labo/utils"
 	"log"
 	"net"
 	"os"
@@ -24,18 +25,20 @@ func put(args []string, conn net.Conn, reader *bufio.Reader) {
 		//defer os.Remove(filename)
 	}
 
+	start := my_time.Now()
 	_, err = io.Copy(file, reader)
 	log_init.PrintAndLogIfError(err)
 	if err != nil {
 		return
 	}
+	log_init.PrintAndLog("Tiempo de subida ->", my_time.GetFormattedTime(start))
 }
 func get(args []string, conn net.Conn) {
 	filename := args[1]
 	log_init.PrintAndLog("GET request del archivo", filename, "desde", conn.RemoteAddr())
 }
-func ls(args []string, conn net.Conn) {
-	log.Println("LS request desde", conn.RemoteAddr())
+func ls(conn net.Conn) {
+	log_init.PrintAndLog("LS request desde", conn.RemoteAddr())
 	for file := range metadata {
 		fmt.Fprintf(conn, "%s ", file)
 	}
@@ -64,13 +67,12 @@ func handleConnection(conn net.Conn, wg *sync.WaitGroup) {
 	case "get":
 		get(args, conn)
 	case "ls":
-		ls(args, conn)
+		ls(conn)
 	case "info":
 		info(args, conn)
 	default:
 		log_init.PrintAndLog("Comando no reconocido: ", strings.TrimSpace(line))
 	}
-
 }
 
 func main() {

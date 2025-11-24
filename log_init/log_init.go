@@ -1,6 +1,7 @@
 package log_init
 
 import (
+	"fmt"
 	"log"
 	"os"
 )
@@ -19,4 +20,16 @@ func InitializeLog() {
 
 func FinalizeLog() {
 	logFile.Close()
+}
+
+func PrintAndLogIfError(err error) {
+	if err != nil {
+		fmt.Println(err)
+		log.Println(err)
+	}
+}
+
+func PrintAndLog(s string) {
+	fmt.Println(s)
+	log.Println(s)
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"labo/commands"
 	"labo/log_init"
 	"log"
 	"net"
@@ -27,11 +26,10 @@ func put(args []string) {
 
 	response, err := connReader.ReadString('\n')
 	if err != nil {
-		fmt.Println("error en respuesta")
-		log.Println(err)
+		log_init.PrintAndLogIfError(err)
 		return
 	}
-	fmt.Println(response)
+	fmt.Print(response)
 
 }
 func get(args []string) {
@@ -72,6 +70,6 @@ func main() {
 	for {
 		fmt.Print("> ")
 		input, _ := commandReader.ReadString('\n')
-		commands.ExecCommand(input, functionMap)
+		execCommand(input, functionMap)
 	}
 }

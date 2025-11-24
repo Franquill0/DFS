@@ -18,13 +18,17 @@ var commandsMap = map[string]func([]string, net.Conn){
 
 func put(args []string, conn net.Conn) {
 	log_init.PrintAndLog("Put request: " + args[1])
-	conn.Write([]byte("Put request\n"))
 }
 func get(args []string, conn net.Conn) {
 	log.Println("Get request:", args[1])
 }
 func ls(args []string, conn net.Conn) {
 	log.Println("Ls request:")
+	conn.Write([]byte("OK "))
+	for file := range metadata {
+		conn.Write([]byte(file + " "))
+	}
+	conn.Write([]byte("\n"))
 }
 func info(args []string, conn net.Conn) {
 	log.Println("Info request:", args[1])

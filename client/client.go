@@ -10,17 +10,18 @@ import (
 	"strings"
 )
 
+const serverIPPort = "192.168.18.41:8080"
+
 func put(args []string) {
 	if len(args) != 2 {
 		fmt.Println("Uso -> put <archivo>")
 		return
 	}
 	log.Println("Put request:", args[1])
-	conn, err := net.Dial("tcp", "localhost:8080")
-	if err != nil {
-		fmt.Println("Error en conexion:", err)
+	conn := stablishConn()
+	if conn != nil {
+		defer conn.Close()
 	}
-	defer conn.Close()
 	conn.Write([]byte(strings.Join(args, " ") + "\n"))
 	connReader := bufio.NewReader(conn)
 
@@ -43,6 +44,20 @@ func ls(args []string) {
 		fmt.Println("Uso -> ls")
 		return
 	}
+	conn := stablishConn()
+	if conn != nil {
+		defer conn.Close()
+	}
+	conn.Write([]byte(strings.Join(args, " ") + "\n"))
+	connReader := bufio.NewReader(conn)
+
+	response, err := connReader.ReadString('\n')
+	if err != nil {
+		log_init.PrintAndLogIfError(err)
+		return
+	}
+	fmt.Print(response)
+
 }
 func info(args []string) {
 	if len(args) != 2 {
@@ -55,6 +70,14 @@ func exit(args []string) {
 	os.Exit(0)
 }
 
+func stablishConn() net.Conn {
+	conn, err := net.Dial("tcp", serverIPPort)
+	if err != nil {
+		log_init.PrintAndLogIfError(err)
+		return nil
+	}
+	return conn
+}
 func main() {
 	log_init.InitializeLog()
 

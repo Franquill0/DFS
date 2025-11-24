@@ -24,8 +24,8 @@ func FinalizeLog() {
 
 func PrintAndLogIfError(err error) {
 	if err != nil {
-		fmt.Println(err)
-		log.Println(err)
+		fmt.Println("Error:", err)
+		log.Println("Error:", err)
 	}
 }
 

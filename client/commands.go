@@ -7,6 +7,9 @@ import (
 
 func execCommand(input string, functions map[string]func([]string)) {
 	args := strings.Fields(input)
+	if len(args) == 0 {
+		return
+	}
 	command := args[0]
 	function, ok := functions[command]
 	if !ok {

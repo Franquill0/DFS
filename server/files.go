@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 type FileBlock struct {
@@ -14,23 +15,23 @@ type FileBlock struct {
 
 var metadata = map[string][]FileBlock{}
 
-func PrintMetadata() {
+func printMetadata() {
 	fmt.Println(metadata)
 }
 
-func AddFile(filename string) {
+func addFile(filename string) {
 	if _, ok := metadata[filename]; !ok {
 		metadata[filename] = []FileBlock{}
 	}
 }
 
-func AddFileBlock(filename, block, node string) error {
+func addFileBlock(filename string, block int, node string) error {
 	var err error
-	if existingFile, ok := metadata[filename]; !ok {
-		err = errors.New("Archivo no existente!")
+	if _, ok := metadata[filename]; !ok {
+		err = errors.New("File not found: " + filename)
 	} else {
-		existingFile = append(existingFile, FileBlock{
-			Block: block,
+		metadata[filename] = append(metadata[filename], FileBlock{
+			Block: "b" + strconv.Itoa(block),
 			Node:  node,
 		})
 		err = nil
@@ -38,21 +39,22 @@ func AddFileBlock(filename, block, node string) error {
 	return err
 }
 
-func RemoveFile(filename string) error {
+func removeFile(filename string) error {
 	var err error
 	if _, ok := metadata[filename]; ok {
 		delete(metadata, filename)
 		err = nil
 	} else {
-		err = errors.New("Archivo no existente!")
+		err = errors.New("File not found: " + filename)
 	}
 	return err
 }
 
-func UpdateJSONMetadata() error {
+func updateJSONMetadata() error {
+	path := "metadata.json"
 	jsonBytes, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile("metadata.json", jsonBytes, 0644)
+	return os.WriteFile(path, jsonBytes, 0644)
 }

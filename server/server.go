@@ -42,9 +42,7 @@ func handleConnection(conn net.Conn) {
 		conn.Write([]byte("ERR al leer el comando!\n"))
 		return
 	}
-
 	commands.ExecCommand(line, commandsMap)
-
 }
 
 func main() {
@@ -53,7 +51,7 @@ func main() {
 	port := 8080
 	ln, err := net.Listen("tcp", "localhost:"+strconv.Itoa(port))
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
 	}
 	fmt.Println("Escuchando en el puerto", port, "...")
 

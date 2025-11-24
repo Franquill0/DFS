@@ -9,29 +9,111 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 )
 
-func put(args []string, conn net.Conn, reader *bufio.Reader) {
-	filename := args[1]
-	log_init.PrintAndLog("PUT request del archivo", filename, "desde", conn.RemoteAddr())
-	file, err := os.Create(filename)
+const filesDirectory = "files/"
+
+func downloadFile(filename string, reader *bufio.Reader) (*os.File, error) {
+	file, err := os.OpenFile(filesDirectory+filename, os.O_CREATE|os.O_RDWR, 0644)
 	log_init.PrintAndLogIfError(err)
 	if err != nil {
-		return
-	} else {
-		//defer os.Remove(filename)
+		return file, err
 	}
 
 	start := my_time.Now()
 	_, err = io.Copy(file, reader)
 	log_init.PrintAndLogIfError(err)
 	if err != nil {
+		return file, err
+	}
+	log_init.PrintAndLog("Tiempo de subida al servidor ->", my_time.GetFormattedTime(start))
+
+	file.Seek(0, 0)
+	return file, nil
+}
+
+func fileFragmentation(file *os.File) (int, error) {
+	defer file.Close()
+	filename := filepath.Base(file.Name())
+	const blockSize = 1024
+	buffer := make([]byte, blockSize)
+	part := 0
+	for {
+		n, err := file.Read(buffer)
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return 0, nil
+		}
+
+		// Crear archivo fragmento
+		partFileName := fmt.Sprintf("%s.part%d", filename, part)
+		partFile, err := os.Create(filesDirectory + partFileName)
+		if err != nil {
+			return 0, nil
+		}
+		defer partFile.Close()
+
+		// Guardar el fragmento (solo n bytes)
+		_, err = partFile.Write(buffer[:n])
+		if err != nil {
+			return 0, nil
+		}
+
+		part++
+	}
+	log_init.PrintAndLog("Archivo", filename, "dividido en", part, "partes\n")
+	return part, nil
+}
+
+func put(args []string, conn net.Conn, reader *bufio.Reader) {
+	filename := args[1]
+	log_init.PrintAndLog("PUT request del archivo", filename, "desde", conn.RemoteAddr())
+
+	file, err := downloadFile(filename, reader)
+	if err != nil {
 		return
 	}
-	log_init.PrintAndLog("Tiempo de subida ->", my_time.GetFormattedTime(start))
+
+	// Fragmentar archivo
+	parts, err := fileFragmentation(file)
+	log_init.PrintAndLogIfError(err)
+	if err != nil {
+		return
+	}
+
+	datanodes := getDatanodes()
+	datanodesAmount := len(datanodes)
+	if datanodesAmount == 0 {
+		log_init.PrintAndLog("No hay datanodes disponibles!")
+		return
+	} else if datanodesAmount == 1 {
+		go sendPartsToDatanode(datanodes[0], 0, parts, filename)
+	}
+
+	partsPerDatanode := int(parts / datanodesAmount)
+
+	for index := 0; index < datanodesAmount-1; index++ {
+		firstPart := index * partsPerDatanode
+		lastPart := (index + 1) * partsPerDatanode
+		go sendPartsToDatanode(datanodes[index], firstPart, lastPart, filename)
+	}
+	go sendPartsToDatanode(datanodes[datanodesAmount-1])
+
+	// Enviar fragmentos a datanodes
+	/*
+		datanodeConn, err := net.Dial("tcp", "192.168.18.41:40249")
+		fmt.Fprintf(datanodeConn, "store %s.part0\n", filename)
+		part0, err := os.Open(filesDirectory + filename + ".part0")
+		_, err = io.Copy(datanodeConn, part0)
+		part0.Close()
+		datanodeConn.Close()
+	*/
+
 }
 func get(args []string, conn net.Conn) {
 	filename := args[1]
@@ -90,6 +172,7 @@ func main() {
 	go func() {
 		bufio.NewReader(os.Stdin).ReadBytes('\n')
 		log_init.PrintAndLog("Cerrando servidor...")
+		log_init.PrintAndLog("Esperando finalización de hilos...")
 		ln.Close()
 	}()
 

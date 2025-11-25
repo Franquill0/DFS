@@ -17,7 +17,8 @@ import (
 
 const filesDirectory = "files/"
 
-func sendPartsToDatanode(addr string, filename string, first, last int) {
+func sendPartsToDatanode(addr string, filename string, first, last int, wg *sync.WaitGroup) {
+	defer wg.Done()
 	conn, err := net.Dial("tcp", addr)
 	log_init.PrintAndLogIfError(err)
 	if err != nil {
@@ -42,11 +43,11 @@ func sendPartsToDatanode(addr string, filename string, first, last int) {
 		// Enviar comando store con el nombre del archivo y su tamaño
 		log_init.PrintAndLog("Enviando: store", partName, stat.Size())
 		fmt.Fprintf(writer, "STORE %s %d\n", partName, stat.Size())
+		writer.Flush()
 
 		// Enviar contenido
 		io.Copy(writer, partFile)
 
-		writer.Flush()
 		partFile.Close()
 		err = os.Remove(partPath)
 		if err != nil {
@@ -65,7 +66,7 @@ func addPartFileRange(start, end int, datanode, filename string) {
 	}
 }
 
-func downloadFile(filename string, reader *bufio.Reader) (*os.File, error) {
+func downloadFile(filename string, reader *bufio.Reader, fileSize int) (*os.File, error) {
 	file, err := os.OpenFile(filesDirectory+filename, os.O_CREATE|os.O_RDWR, 0644)
 	log_init.PrintAndLogIfError(err)
 	if err != nil {
@@ -73,7 +74,7 @@ func downloadFile(filename string, reader *bufio.Reader) (*os.File, error) {
 	}
 
 	start := my_time.Now()
-	_, err = io.Copy(file, reader)
+	_, err = io.CopyN(file, reader, int64(fileSize))
 	log_init.PrintAndLogIfError(err)
 	if err != nil {
 		return file, err
@@ -85,7 +86,6 @@ func downloadFile(filename string, reader *bufio.Reader) (*os.File, error) {
 }
 
 func fileFragmentation(file *os.File) (int, error) {
-	defer file.Close()
 	filename := filepath.Base(file.Name())
 	const blockSize = 1024
 	buffer := make([]byte, blockSize)
@@ -95,23 +95,23 @@ func fileFragmentation(file *os.File) (int, error) {
 		if err == io.EOF {
 			break
 		} else if err != nil {
-			return 0, nil
+			return 0, err
 		}
 
 		// Crear archivo fragmento
 		partFileName := fmt.Sprintf("%s.part%d", filename, part)
 		partFile, err := os.Create(filesDirectory + partFileName)
 		if err != nil {
-			return 0, nil
+			return 0, err
 		}
-		defer partFile.Close()
 
 		// Guardar el fragmento (solo n bytes)
 		_, err = partFile.Write(buffer[:n])
 		if err != nil {
-			return 0, nil
+			return 0, err
 		}
 
+		partFile.Close()
 		part++
 	}
 	log_init.PrintAndLog("Archivo", filename, "dividido en", part, "partes\n")
@@ -127,7 +127,16 @@ func removeFileFromDatanodes(filename string) {
 		} else {
 			writer := bufio.NewWriter(conn)
 			fmt.Fprintf(writer, "remove %s\n", filename)
+			writer.Flush()
 			log_init.PrintAndLog("REMOVE request de", filename, "hacia ", datanode)
+			reader := bufio.NewReader(conn)
+			line, err := reader.ReadString('\n')
+			response := strings.TrimSpace(line)
+			if err != nil || response != "OK" {
+				log_init.PrintAndLog("Error al leer respuesta del datanode", datanode)
+			} else {
+				log_init.PrintAndLog("Respuesta del datanode", datanode, "->", response)
+			}
 		}
 		conn.Close()
 	}
@@ -144,7 +153,8 @@ func put(args []string, conn net.Conn, reader *bufio.Reader) {
 		addFile(filename)
 	}
 
-	file, err := downloadFile(filename, reader)
+	fileSize, _ := strconv.Atoi(args[2])
+	file, err := downloadFile(filename, reader, fileSize)
 	if err != nil {
 		return
 	}
@@ -155,6 +165,7 @@ func put(args []string, conn net.Conn, reader *bufio.Reader) {
 	if err != nil || parts == 0 {
 		return
 	}
+	file.Close()
 	err = os.Remove(filesDirectory + filename)
 	if err != nil {
 		log_init.PrintAndLog("Error al eliminar", filename)
@@ -174,6 +185,7 @@ func distributePartFiles(parts int, filename string) {
 
 	partsPerDatanode := (parts + datanodesAmount - 1) / datanodesAmount
 
+	var wg sync.WaitGroup
 	for index, datanode := range datanodes {
 		if parts == 0 {
 			break
@@ -188,8 +200,11 @@ func distributePartFiles(parts int, filename string) {
 			parts = 0
 		}
 		addPartFileRange(firstPart, lastPart, datanode, filename)
-		go sendPartsToDatanode(datanode, filename, firstPart, lastPart)
+		wg.Add(1)
+		go sendPartsToDatanode(datanode, filename, firstPart, lastPart, &wg)
 	}
+	wg.Wait()
+	log_init.PrintAndLog("Subida de archivos a los datanodes finalizada!")
 }
 
 func get(args []string, conn net.Conn) {
@@ -198,12 +213,15 @@ func get(args []string, conn net.Conn) {
 
 	writer := bufio.NewWriter(conn)
 	datanodesWithFile := getDatanodesWithFile(filename)
-	fmt.Fprintf(writer, "blocks %d ")
-	for {
+	blocks := getParts(filename)
+	fmt.Fprintf(writer, "blocks %d ", blocks)
+	writer.Flush()
+	for _, datanode := range datanodesWithFile {
 		fmt.Fprintf(writer, "%s ", datanode)
-
+		writer.Flush()
 	}
-
+	fmt.Fprintf(writer, "\n")
+	writer.Flush()
 }
 func ls(conn net.Conn) {
 	log_init.PrintAndLog("LS request desde", conn.RemoteAddr())

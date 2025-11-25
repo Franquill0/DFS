@@ -14,7 +14,8 @@ import (
 
 const blocksDirectory = "blocks/"
 
-func read(conn net.Conn, reader *bufio.Reader) {
+func read(conn net.Conn, reader *bufio.Reader, filename string) {
+	writer := bufio.NewWriter(conn)
 
 }
 
@@ -53,19 +54,22 @@ func store(reader *bufio.Reader) {
 	}
 }
 
-func removeFile(filename string) {
+func removeFile(filename string, conn net.Conn) {
 	pattern := fmt.Sprintf(`^%s\.part[0-9]+$`, regexp.QuoteMeta(filename))
 	re := regexp.MustCompile(pattern)
 
-	entries, _ := os.ReadDir(blocksDirectory)
+	entries, _ := os.ReadDir(strings.Split(blocksDirectory, "/")[0])
 
 	for _, entry := range entries {
 		name := entry.Name()
 		if re.MatchString(name) {
-			os.Remove(name)
+			os.Remove(blocksDirectory + name)
 			log_init.PrintAndLog("Bloque eliminado:", name)
 		}
 	}
+	writer := bufio.NewWriter(conn)
+	fmt.Fprintf(writer, "OK\n")
+	writer.Flush()
 }
 
 func handleConnection(conn net.Conn) {
@@ -81,13 +85,13 @@ func handleConnection(conn net.Conn) {
 	command := args[0]
 	switch command {
 	case "read":
-		read(conn, reader)
+		read(conn, reader, args[1])
 	case "store":
 		store(reader)
 	case "ping":
 		log_init.PrintAndLog("Ping del servidor.")
 	case "remove":
-		removeFile(args[1])
+		removeFile(args[1], conn)
 	default:
 		log_init.PrintAndLog("Comando no reconocido: ", strings.TrimSpace(line))
 	}

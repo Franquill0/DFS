@@ -23,8 +23,27 @@ func printMetadata() {
 	fmt.Println(metadata)
 }
 
-func getDataNodesWithFile(filename string) []string {
+func getParts(filename string) int {
+	if !existingFile(filename) {
+		return 0
+	}
+	return len(metadata[filename])
 
+}
+
+func getDatanodesWithFile(filename string) []string {
+	if !existingFile(filename) {
+		return []string{}
+	}
+	datanodes := make(map[string]string)
+	var datanodesList []string
+	for _, fileEntry := range metadata[filename] {
+		if _, ok := datanodes[fileEntry.Node]; !ok {
+			datanodes[fileEntry.Node] = fileEntry.Node
+			datanodesList = append(datanodesList, datanodes[fileEntry.Node])
+		}
+	}
+	return datanodesList
 }
 
 func addFile(filename string) {

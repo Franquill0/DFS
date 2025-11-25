@@ -8,25 +8,50 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 const blocksDirectory = "blocks/"
 
-func read(blockID string, conn net.Conn) {
+func read(conn net.Conn, reader *bufio.Reader) {
 
 }
-func store(blockID string, conn net.Conn, reader *bufio.Reader) {
-	log_init.PrintAndLog("STORE request del BLOQUE", blockID)
-	file, err := os.Create(blocksDirectory + blockID)
-	log_init.PrintAndLogIfError(err)
-	if err != nil {
-		return
-	}
-	_, err = io.Copy(file, reader)
-	log_init.PrintAndLogIfError(err)
-	if err != nil {
-		return
+
+func store(reader *bufio.Reader) {
+	for {
+		header, err := reader.ReadString('\n')
+		if err != nil {
+			log_init.PrintAndLog("Error en leer store: ", err)
+			return
+		}
+		fmt.Println("header -> ", header)
+
+		header = strings.TrimSpace(header)
+		if header == "END" {
+			return
+		}
+
+		parts := strings.Fields(header)
+		if parts[0] != "STORE" || len(parts) != 3 {
+			return
+		}
+
+		blockID := parts[1]                           // Nombre del archivo
+		size, _ := strconv.ParseInt(parts[2], 10, 64) // Tamaño del archivo
+		fmt.Println("Archivo de tamaño", size)
+
+		file, err := os.Create(blocksDirectory + blockID)
+		if err != nil {
+			log_init.PrintAndLog("Error al crear ", blockID, "->", err)
+			return
+		}
+
+		// Copiar exactamente size bytes
+		io.CopyN(file, reader, size)
+
+		log_init.PrintAndLog("Guardado bloque:", blockID)
+		file.Close()
 	}
 }
 
@@ -50,18 +75,20 @@ func handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 
 	line, err := reader.ReadString('\n')
-	log_init.PrintAndLogIfError(err)
+	fmt.Println(line)
 	if err != nil {
+		log_init.PrintAndLog("Error en lectura del comando!", err)
 		return
 	}
 	args := strings.Fields(line)
 	command := args[0]
-	blockID := args[1]
 	switch command {
 	case "read":
-		read(blockID, conn)
+		read(conn, reader)
 	case "store":
-		store(blockID, conn, reader)
+		store(reader)
+	case "ping":
+		log_init.PrintAndLog("Ping del servidor.")
 	default:
 		log_init.PrintAndLog("Comando no reconocido: ", strings.TrimSpace(line))
 	}
@@ -91,16 +118,20 @@ func main() {
 	fmt.Println("Presione ENTER para salir...")
 
 	// Rutina para salir del servidor
+	getOut := false
 	go func() {
 		bufio.NewReader(os.Stdin).ReadBytes('\n')
 		log_init.PrintAndLog("Cerrando datanode...")
+		getOut = true
 		ln.Close()
 	}()
 
 	for {
 		conn, err := ln.Accept()
-		log_init.PrintAndLogIfError(err)
 		if err != nil {
+			if !getOut {
+				log_init.PrintAndLogIfError(err)
+			}
 			break
 		}
 		go handleConnection(conn)

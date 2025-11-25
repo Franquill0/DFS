@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/json"
 	"labo/log_init"
+	"net"
 	"os"
+	"time"
 )
 
 type DatanodeConfig struct {
@@ -22,4 +24,26 @@ func getDatanodes() []string {
 	log_init.PrintAndLogIfError(err)
 
 	return cfg.Datanodes
+}
+
+func getAvailableDatanodes() []string {
+	totalDatanodes := getDatanodes()
+	var datanodesAvailable []string
+
+	for _, datanode := range totalDatanodes {
+		if isDatanodeUp(datanode) {
+			datanodesAvailable = append(datanodesAvailable, datanode)
+		}
+	}
+	return datanodesAvailable
+}
+
+func isDatanodeUp(address string) bool {
+	conn, err := net.DialTimeout("tcp", address, time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Write([]byte("ping\n"))
+	defer conn.Close()
+	return true
 }

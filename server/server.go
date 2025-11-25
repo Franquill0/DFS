@@ -17,6 +17,44 @@ import (
 
 const filesDirectory = "files/"
 
+func sendPartsToDatanode(addr string, filename string, first, last int) {
+	conn, err := net.Dial("tcp", addr)
+	log_init.PrintAndLogIfError(err)
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+
+	writer := bufio.NewWriter(conn)
+	fmt.Fprintf(writer, "store\n")
+
+	for i := first; i < last; i++ {
+		partName := fmt.Sprintf("%s.part%d", filename, i)
+		partPath := filesDirectory + partName
+
+		partFile, err := os.Open(partPath)
+		if err != nil {
+			continue
+		}
+
+		stat, _ := partFile.Stat()
+
+		// Enviar comando store con el nombre del archivo y su tamaño
+		log_init.PrintAndLog("Enviando: store", partName, stat.Size())
+		fmt.Fprintf(writer, "STORE %s %d\n", partName, stat.Size())
+
+		// Enviar contenido
+		io.Copy(writer, partFile)
+
+		writer.Flush()
+		partFile.Close()
+	}
+
+	// Avisamos que no hay más bloques
+	fmt.Fprintf(writer, "END\n")
+	writer.Flush()
+}
+
 func downloadFile(filename string, reader *bufio.Reader) (*os.File, error) {
 	file, err := os.OpenFile(filesDirectory+filename, os.O_CREATE|os.O_RDWR, 0644)
 	log_init.PrintAndLogIfError(err)
@@ -82,27 +120,36 @@ func put(args []string, conn net.Conn, reader *bufio.Reader) {
 	// Fragmentar archivo
 	parts, err := fileFragmentation(file)
 	log_init.PrintAndLogIfError(err)
-	if err != nil {
+	if err != nil || parts == 0 {
 		return
 	}
 
-	datanodes := getDatanodes()
+	datanodes := getAvailableDatanodes()
 	datanodesAmount := len(datanodes)
 	if datanodesAmount == 0 {
 		log_init.PrintAndLog("No hay datanodes disponibles!")
 		return
-	} else if datanodesAmount == 1 {
-		go sendPartsToDatanode(datanodes[0], 0, parts, filename)
 	}
 
-	partsPerDatanode := int(parts / datanodesAmount)
+	partsPerDatanode := (parts + datanodesAmount - 1) / datanodesAmount
 
-	for index := 0; index < datanodesAmount-1; index++ {
+	for index, datanode := range datanodes {
+		if parts == 0 {
+			break
+		}
 		firstPart := index * partsPerDatanode
-		lastPart := (index + 1) * partsPerDatanode
-		go sendPartsToDatanode(datanodes[index], firstPart, lastPart, filename)
+		lastPart := 0
+		if parts-partsPerDatanode >= 0 {
+			lastPart = firstPart + partsPerDatanode
+			parts = parts - partsPerDatanode
+		} else {
+			lastPart = firstPart + parts
+			parts = 0
+			go sendPartsToDatanode(datanode, filename, firstPart, lastPart)
+			break
+		}
+		go sendPartsToDatanode(datanode, filename, firstPart, lastPart)
 	}
-	go sendPartsToDatanode(datanodes[datanodesAmount-1])
 
 	// Enviar fragmentos a datanodes
 	/*
@@ -169,10 +216,12 @@ func main() {
 	fmt.Println("Presione ENTER para salir...")
 
 	// Rutina para salir del servidor
+	getOutServer := false
 	go func() {
 		bufio.NewReader(os.Stdin).ReadBytes('\n')
 		log_init.PrintAndLog("Cerrando servidor...")
 		log_init.PrintAndLog("Esperando finalización de hilos...")
+		getOutServer = true
 		ln.Close()
 	}()
 
@@ -181,7 +230,9 @@ func main() {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Println(err)
+			if !getOutServer {
+				log_init.PrintAndLogIfError(err)
+			}
 			break
 		}
 		waitingThreads.Add(1)

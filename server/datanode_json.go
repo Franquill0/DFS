@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"labo/log_init"
 	"net"
 	"os"
@@ -29,7 +28,6 @@ func getDatanodes() []string {
 
 func getAvailableDatanodes() []string {
 	totalDatanodes := getDatanodes()
-	fmt.Println("Datanodes->>>>>", totalDatanodes)
 	var datanodesAvailable []string
 
 	for _, datanode := range totalDatanodes {

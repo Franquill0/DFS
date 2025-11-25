@@ -2,19 +2,22 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"labo/log_init"
 	"labo/utils"
 	"net"
 	"os"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 )
 
 const serverIPPort = "192.168.18.41:8080"
-const partsDirectory = "parts/"
+const partsDirectory = "parts"
 
 func put(args []string) {
 	if len(args) != 2 {
@@ -81,19 +84,119 @@ func get(args []string) {
 	log_init.PrintAndLog("Cantidad de bloques:", blocks)
 	log_init.PrintAndLog("Datanodes con los archivos:", datanodes)
 
-	getPartsFromDatanodes(datanodes, blocks)
+	getPartsFromDatanodes(filename, datanodes)
+
+	// Reconstruyo el archivo
+	err = reconstructFile(filename, "copia_"+filename, blocks)
+	log_init.PrintAndLogIfError(err)
 
 }
+func reconstructFile(filename, output string, blocks int) error {
+	entries, err := os.ReadDir(partsDirectory)
+	if err != nil {
+		return err
+	}
 
-func handleDatanodeConnection(conn net.Conn, wg *sync.WaitGroup) {
+	pattern := fmt.Sprintf(`^%s\.part([0-9]+)$`, regexp.QuoteMeta(filename))
+	re := regexp.MustCompile(pattern)
+
+	// mapa de índice -> nombre de archivo
+	partMap := make(map[int]string)
+	var indices []int
+
+	for _, entry := range entries {
+		name := entry.Name()
+		match := re.FindStringSubmatch(name)
+		if len(match) == 2 {
+			idx, _ := strconv.Atoi(match[1])
+			partMap[idx] = name
+			indices = append(indices, idx)
+		}
+	}
+
+	if len(indices) == 0 {
+		log_init.PrintAndLog("No se encontraron partes para", filename)
+		return errors.New("No se encontraron partes para " + filename)
+	}
+
+	sort.Ints(indices)
+
+	outFile, err := os.Create(output)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
+
+	for _, idx := range indices {
+		partName := partMap[idx]
+		partFile, err := os.Open(partsDirectory + "/" + partName)
+		if err != nil {
+			return err
+		}
+
+		if blocks != len(indices) {
+			log_init.PrintAndLog("Error: Se han encontrado", len(indices), "archivos donde deberían ser", blocks)
+			log_init.PrintAndLog("Abortando reconstrucción de", filename)
+			break
+		}
+		_, err = io.Copy(outFile, partFile)
+		partFile.Close()
+		if err != nil {
+			return err
+		}
+		log_init.PrintAndLog("Concatenado:", partName)
+	}
+	// Elimino todas las partes
+	for _, idx := range indices {
+		partName := partMap[idx]
+		os.Remove(partsDirectory + "/" + partName)
+	}
+	if blocks != len(indices) {
+		return errors.New("Error: No se descargaron suficientes bloques")
+	}
+	log_init.PrintAndLog("Archivo reconstruido:", output)
+	return nil
+}
+func handleDatanodeConnection(conn net.Conn, filename string, wg *sync.WaitGroup) {
 	defer wg.Done()
 	writer := bufio.NewWriter(conn)
-	fmt.Fprintf(writer, "read\n")
+	reader := bufio.NewReader(conn)
+	fmt.Fprintf(writer, "read %s\n", filename)
 	writer.Flush()
+
+	for {
+		header, err := reader.ReadString('\n')
+		if err != nil {
+			log_init.PrintAndLog("Error al leer comando del handleDatanodeConnection!")
+		}
+
+		header = strings.TrimSpace(header)
+		if header == "end" {
+			return
+		}
+
+		fullLine := strings.Fields(header)
+		fileSize, _ := strconv.Atoi(fullLine[2])
+		filename := fullLine[1]
+		file, err := os.Create(partsDirectory + "/" + filename)
+		if err != nil {
+			log_init.PrintAndLog("Error al crear archivo", filename)
+		}
+
+		_, err = io.CopyN(file, reader, int64(fileSize))
+		if err != nil {
+			log_init.PrintAndLog("Error al copiar el contenido del archivo", filename)
+		}
+
+		file.Close()
+
+		fmt.Fprintf(writer, "OK\n")
+		writer.Flush()
+	}
 
 }
 
-func getPartsFromDatanodes(datanodes []string, blocks int) {
+func getPartsFromDatanodes(filename string, datanodes []string) {
 	var wg sync.WaitGroup
 	for _, datanode := range datanodes {
 		log_init.PrintAndLog("Estableciendo conexión con datanode", datanode)
@@ -105,10 +208,9 @@ func getPartsFromDatanodes(datanodes []string, blocks int) {
 			break
 		}
 		wg.Add(1)
-		go handleDatanodeConnection(conn, &wg)
+		go handleDatanodeConnection(conn, filename, &wg)
 	}
 	wg.Wait()
-
 }
 
 func ls(args []string) {
@@ -123,7 +225,6 @@ func ls(args []string) {
 		log_init.PrintAndLog("Conexión fallida con el servidor")
 		return
 	}
-	log_init.PrintAndLog("LS request")
 	fmt.Fprintf(conn, "ls\n")
 	connReader := bufio.NewReader(conn)
 
@@ -139,6 +240,35 @@ func info(args []string) {
 		fmt.Println("Uso -> info <archivo>")
 		return
 	}
+	conn := stablishConn(serverIPPort)
+	if conn != nil {
+		defer conn.Close()
+	} else {
+		log_init.PrintAndLog("Conexión fallida con el servidor")
+		return
+	}
+
+	writer := bufio.NewWriter(conn)
+	filename := args[1]
+	fmt.Fprintf(writer, "info %s\n", filename)
+	writer.Flush()
+	reader := bufio.NewReader(conn)
+	for {
+		header, err := reader.ReadString('\n')
+		if err != nil {
+			log_init.PrintAndLog("Error en leer info:", err)
+			return
+		}
+
+		header = strings.TrimSpace(header)
+		if header == "end" {
+			log_init.PrintAndLog("Fin de comunicación de INFO")
+			return
+		}
+
+		fmt.Println(header)
+
+	}
 }
 func exit(args []string) {
 	log_init.FinalizeLog()
@@ -153,6 +283,7 @@ func stablishConn(ipPort string) net.Conn {
 	}
 	return conn
 }
+
 func main() {
 	log_init.InitializeLog()
 

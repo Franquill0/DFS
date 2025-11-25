@@ -1,4 +1,4 @@
 logs.txt
-*.json
 datanode/blocks/
 server/files/
+client/parts/

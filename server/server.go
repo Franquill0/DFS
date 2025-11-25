@@ -149,6 +149,8 @@ func put(args []string, conn net.Conn, reader *bufio.Reader) {
 	if existingFile(filename) {
 		log_init.PrintAndLog("Archivo existente ", filename, "-> Sobreescribiendo contenido")
 		removeFileFromDatanodes(filename)
+		err := removeFile(filename)
+		log_init.PrintAndLogIfError(err)
 	} else {
 		addFile(filename)
 	}
@@ -233,6 +235,14 @@ func ls(conn net.Conn) {
 func info(args []string, conn net.Conn) {
 	filename := args[1]
 	log_init.PrintAndLog("INFO request del archivo", filename, "desde", conn.RemoteAddr())
+	writer := bufio.NewWriter(conn)
+	fileBlocks := getFileInfo(filename)
+	for i, block := range fileBlocks {
+		fmt.Fprintf(writer, "Bloque %d: ID=%s, Node=%s\n", i, block.Block, block.Node)
+		writer.Flush()
+	}
+	fmt.Fprintf(writer, "end\n")
+	writer.Flush()
 }
 
 func handleConnection(conn net.Conn, wg *sync.WaitGroup) {

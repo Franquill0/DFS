@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"strconv"
 )
@@ -19,16 +18,19 @@ var metadata Metadata
 
 const path = "metadata.json"
 
-func printMetadata() {
-	fmt.Println(metadata)
-}
-
 func getParts(filename string) int {
 	if !existingFile(filename) {
 		return 0
 	}
 	return len(metadata[filename])
 
+}
+
+func getFileInfo(filename string) []FileBlock {
+	if !existingFile(filename) {
+		return []FileBlock{}
+	}
+	return metadata[filename]
 }
 
 func getDatanodesWithFile(filename string) []string {

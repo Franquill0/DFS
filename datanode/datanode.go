@@ -12,11 +12,28 @@ import (
 	"strings"
 )
 
-const blocksDirectory = "blocks/"
+const blocksDirectory = "blocks"
 
 func read(conn net.Conn, reader *bufio.Reader, filename string) {
 	writer := bufio.NewWriter(conn)
+	for packet, name := range findAll(filename) {
+		file, err := os.Open(blocksDirectory + "/" + name)
+		if err != nil {
+			log_init.PrintAndLog("Error al leer", blocksDirectory, "/", name)
+			return
+		}
+		stat, _ := file.Stat()
+		fmt.Fprintf(writer, "read %s %d\n", name, stat.Size())
+		writer.Flush()
 
+		_, err = io.CopyN(writer, file, stat.Size())
+
+		file.Close()
+		response, err := reader.ReadString('\n')
+		log_init.PrintAndLog("Respuesta del cliente: Archivo ", filename, "Paquete", packet, response)
+	}
+	fmt.Fprintf(writer, "end\n")
+	writer.Flush()
 }
 
 func store(reader *bufio.Reader) {
@@ -40,7 +57,7 @@ func store(reader *bufio.Reader) {
 		blockID := parts[1]                           // Nombre del archivo
 		size, _ := strconv.ParseInt(parts[2], 10, 64) // Tamaño del archivo
 
-		file, err := os.Create(blocksDirectory + blockID)
+		file, err := os.Create(blocksDirectory + "/" + blockID)
 		if err != nil {
 			log_init.PrintAndLog("Error al crear ", blockID, "->", err)
 			return
@@ -54,22 +71,34 @@ func store(reader *bufio.Reader) {
 	}
 }
 
+func removeAndLog(filename string) {
+	os.Remove(blocksDirectory + "/" + filename)
+	log_init.PrintAndLog("Bloque eliminado:", filename)
+}
+
 func removeFile(filename string, conn net.Conn) {
-	pattern := fmt.Sprintf(`^%s\.part[0-9]+$`, regexp.QuoteMeta(filename))
-	re := regexp.MustCompile(pattern)
-
-	entries, _ := os.ReadDir(strings.Split(blocksDirectory, "/")[0])
-
-	for _, entry := range entries {
-		name := entry.Name()
-		if re.MatchString(name) {
-			os.Remove(blocksDirectory + name)
-			log_init.PrintAndLog("Bloque eliminado:", name)
-		}
+	for _, file := range findAll(filename) {
+		removeAndLog(file)
 	}
 	writer := bufio.NewWriter(conn)
 	fmt.Fprintf(writer, "OK\n")
 	writer.Flush()
+}
+
+func findAll(filename string) []string {
+	var matches []string
+	pattern := fmt.Sprintf(`^%s\.part[0-9]+$`, regexp.QuoteMeta(filename))
+	re := regexp.MustCompile(pattern)
+
+	entries, _ := os.ReadDir(blocksDirectory)
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if re.MatchString(name) {
+			matches = append(matches, name)
+		}
+	}
+	return matches
 }
 
 func handleConnection(conn net.Conn) {

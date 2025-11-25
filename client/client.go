@@ -9,6 +9,7 @@ import (
 	"labo/utils"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -84,7 +85,12 @@ func get(args []string) {
 	log_init.PrintAndLog("Cantidad de bloques:", blocks)
 	log_init.PrintAndLog("Datanodes con los archivos:", datanodes)
 
-	getPartsFromDatanodes(filename, datanodes)
+	err = getPartsFromDatanodes(filename, datanodes)
+	defer removeRemainingPartsFile(filename)
+	if err != nil {
+		log_init.PrintAndLogIfError(err)
+		return
+	}
 
 	// Reconstruyo el archivo
 	err = reconstructFile(filename, "copia_"+filename, blocks)
@@ -117,6 +123,10 @@ func reconstructFile(filename, output string, blocks int) error {
 	if len(indices) == 0 {
 		log_init.PrintAndLog("No se encontraron partes para", filename)
 		return errors.New("No se encontraron partes para " + filename)
+	} else if len(indices) != blocks {
+		log_init.PrintAndLog("Error: Se han encontrado", len(indices), "archivos donde deberían ser", blocks)
+		log_init.PrintAndLog("Abortando reconstrucción de", filename)
+		return errors.New("Error: No se descargaron suficientes bloques")
 	}
 
 	sort.Ints(indices)
@@ -134,11 +144,6 @@ func reconstructFile(filename, output string, blocks int) error {
 			return err
 		}
 
-		if blocks != len(indices) {
-			log_init.PrintAndLog("Error: Se han encontrado", len(indices), "archivos donde deberían ser", blocks)
-			log_init.PrintAndLog("Abortando reconstrucción de", filename)
-			break
-		}
 		_, err = io.Copy(outFile, partFile)
 		partFile.Close()
 		if err != nil {
@@ -146,17 +151,37 @@ func reconstructFile(filename, output string, blocks int) error {
 		}
 		log_init.PrintAndLog("Concatenado:", partName)
 	}
-	// Elimino todas las partes
-	for _, idx := range indices {
-		partName := partMap[idx]
-		os.Remove(partsDirectory + "/" + partName)
-	}
-	if blocks != len(indices) {
-		return errors.New("Error: No se descargaron suficientes bloques")
-	}
 	log_init.PrintAndLog("Archivo reconstruido:", output)
 	return nil
 }
+
+func removeRemainingPartsFile(filename string) {
+	entries, err := os.ReadDir(partsDirectory)
+	if err != nil {
+		log_init.PrintAndLogIfError(err)
+		return
+	}
+
+	pattern := fmt.Sprintf(`^%s\.part([0-9]+)$`, regexp.QuoteMeta(filename))
+	re := regexp.MustCompile(pattern)
+
+	partMap := make(map[int]string)
+
+	for _, entry := range entries {
+		name := entry.Name()
+		match := re.FindStringSubmatch(name)
+		if len(match) == 2 {
+			idx, _ := strconv.Atoi(match[1])
+			partMap[idx] = name
+		}
+	}
+	for _, part := range partMap {
+		filepath := partsDirectory + "/" + part
+		os.Remove(filepath)
+		log_init.PrintAndLog("Eliminado", part)
+	}
+}
+
 func handleDatanodeConnection(conn net.Conn, filename string, wg *sync.WaitGroup) {
 	defer wg.Done()
 	writer := bufio.NewWriter(conn)
@@ -196,7 +221,7 @@ func handleDatanodeConnection(conn net.Conn, filename string, wg *sync.WaitGroup
 
 }
 
-func getPartsFromDatanodes(filename string, datanodes []string) {
+func getPartsFromDatanodes(filename string, datanodes []string) error {
 	var wg sync.WaitGroup
 	for _, datanode := range datanodes {
 		log_init.PrintAndLog("Estableciendo conexión con datanode", datanode)
@@ -204,13 +229,14 @@ func getPartsFromDatanodes(filename string, datanodes []string) {
 		if conn != nil {
 			log_init.PrintAndLog("Conexión con datanode", datanode, "exitosa")
 		} else {
-			log_init.PrintAndLog("Conexión con datanode", datanode, "falló!")
-			break
+			errorMsg := fmt.Sprintf("Conexión con datanode %s falló, abortando operación GET del archivo %s\n", filename)
+			return errors.New(errorMsg)
 		}
 		wg.Add(1)
 		go handleDatanodeConnection(conn, filename, &wg)
 	}
 	wg.Wait()
+	return nil
 }
 
 func ls(args []string) {

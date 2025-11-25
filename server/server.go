@@ -48,11 +48,21 @@ func sendPartsToDatanode(addr string, filename string, first, last int) {
 
 		writer.Flush()
 		partFile.Close()
+		err = os.Remove(partPath)
+		if err != nil {
+			log_init.PrintAndLog("Error al eliminar", filename)
+		}
 	}
 
 	// Avisamos que no hay más bloques
 	fmt.Fprintf(writer, "END\n")
 	writer.Flush()
+}
+
+func addPartFileRange(start, end int, datanode, filename string) {
+	for i := start; i < end; i++ {
+		addFileBlock(filename, i, datanode)
+	}
 }
 
 func downloadFile(filename string, reader *bufio.Reader) (*os.File, error) {
@@ -108,9 +118,31 @@ func fileFragmentation(file *os.File) (int, error) {
 	return part, nil
 }
 
+func removeFileFromDatanodes(filename string) {
+	datanodes := getAvailableDatanodes()
+	for _, datanode := range datanodes {
+		conn, err := net.Dial("tcp", datanode)
+		if err != nil {
+			log_init.PrintAndLog("Error en conexión para eliminar", filename, "de", datanode)
+		} else {
+			writer := bufio.NewWriter(conn)
+			fmt.Fprintf(writer, "remove %s\n", filename)
+			log_init.PrintAndLog("REMOVE request de", filename, "hacia ", datanode)
+		}
+		conn.Close()
+	}
+}
+
 func put(args []string, conn net.Conn, reader *bufio.Reader) {
 	filename := args[1]
 	log_init.PrintAndLog("PUT request del archivo", filename, "desde", conn.RemoteAddr())
+
+	if existingFile(filename) {
+		log_init.PrintAndLog("Archivo existente ", filename, "-> Sobreescribiendo contenido")
+		removeFileFromDatanodes(filename)
+	} else {
+		addFile(filename)
+	}
 
 	file, err := downloadFile(filename, reader)
 	if err != nil {
@@ -123,7 +155,16 @@ func put(args []string, conn net.Conn, reader *bufio.Reader) {
 	if err != nil || parts == 0 {
 		return
 	}
+	err = os.Remove(filesDirectory + filename)
+	if err != nil {
+		log_init.PrintAndLog("Error al eliminar", filename)
+	}
 
+	distributePartFiles(parts, filename)
+
+}
+
+func distributePartFiles(parts int, filename string) {
 	datanodes := getAvailableDatanodes()
 	datanodesAmount := len(datanodes)
 	if datanodesAmount == 0 {
@@ -145,26 +186,24 @@ func put(args []string, conn net.Conn, reader *bufio.Reader) {
 		} else {
 			lastPart = firstPart + parts
 			parts = 0
-			go sendPartsToDatanode(datanode, filename, firstPart, lastPart)
-			break
 		}
+		addPartFileRange(firstPart, lastPart, datanode, filename)
 		go sendPartsToDatanode(datanode, filename, firstPart, lastPart)
 	}
-
-	// Enviar fragmentos a datanodes
-	/*
-		datanodeConn, err := net.Dial("tcp", "192.168.18.41:40249")
-		fmt.Fprintf(datanodeConn, "store %s.part0\n", filename)
-		part0, err := os.Open(filesDirectory + filename + ".part0")
-		_, err = io.Copy(datanodeConn, part0)
-		part0.Close()
-		datanodeConn.Close()
-	*/
-
 }
+
 func get(args []string, conn net.Conn) {
 	filename := args[1]
 	log_init.PrintAndLog("GET request del archivo", filename, "desde", conn.RemoteAddr())
+
+	writer := bufio.NewWriter(conn)
+	datanodesWithFile := getDatanodesWithFile(filename)
+	fmt.Fprintf(writer, "blocks %d ")
+	for {
+		fmt.Fprintf(writer, "%s ", datanode)
+
+	}
+
 }
 func ls(conn net.Conn) {
 	log_init.PrintAndLog("LS request desde", conn.RemoteAddr())
@@ -206,7 +245,12 @@ func handleConnection(conn net.Conn, wg *sync.WaitGroup) {
 
 func main() {
 	log_init.InitializeLog()
-	defer log_init.FinalizeLog()
+
+	err := loadDatanodesInfo()
+	if err != nil {
+		log_init.PrintAndLog("Error en lectura del archivo json!")
+	}
+
 	port := 8080
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
@@ -240,4 +284,9 @@ func main() {
 		go handleConnection(conn, &waitingThreads)
 	}
 	waitingThreads.Wait()
+	err = updateJSONMetadata()
+	if err != nil {
+		log_init.PrintAndLog("Error al escribir el json, error:", err)
+	}
+	log_init.FinalizeLog()
 }

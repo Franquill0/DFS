@@ -13,16 +13,43 @@ type FileBlock struct {
 	Node  string `json:"node"`
 }
 
-var metadata = map[string][]FileBlock{}
+type Metadata map[string][]FileBlock
+
+var metadata Metadata
+
+const path = "metadata.json"
 
 func printMetadata() {
 	fmt.Println(metadata)
+}
+
+func getDataNodesWithFile(filename string) []string {
+
 }
 
 func addFile(filename string) {
 	if _, ok := metadata[filename]; !ok {
 		metadata[filename] = []FileBlock{}
 	}
+}
+
+func loadDatanodesInfo() error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(data, &metadata)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func existingFile(filename string) bool {
+	_, ok := metadata[filename]
+	return ok
 }
 
 func addFileBlock(filename string, block int, node string) error {
@@ -51,7 +78,6 @@ func removeFile(filename string) error {
 }
 
 func updateJSONMetadata() error {
-	path := "metadata.json"
 	jsonBytes, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return err

@@ -25,7 +25,6 @@ func store(reader *bufio.Reader) {
 			log_init.PrintAndLog("Error en leer store: ", err)
 			return
 		}
-		fmt.Println("header -> ", header)
 
 		header = strings.TrimSpace(header)
 		if header == "END" {
@@ -39,7 +38,6 @@ func store(reader *bufio.Reader) {
 
 		blockID := parts[1]                           // Nombre del archivo
 		size, _ := strconv.ParseInt(parts[2], 10, 64) // Tamaño del archivo
-		fmt.Println("Archivo de tamaño", size)
 
 		file, err := os.Create(blocksDirectory + blockID)
 		if err != nil {
@@ -75,7 +73,6 @@ func handleConnection(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 
 	line, err := reader.ReadString('\n')
-	fmt.Println(line)
 	if err != nil {
 		log_init.PrintAndLog("Error en lectura del comando!", err)
 		return
@@ -89,6 +86,8 @@ func handleConnection(conn net.Conn) {
 		store(reader)
 	case "ping":
 		log_init.PrintAndLog("Ping del servidor.")
+	case "remove":
+		removeFile(args[1])
 	default:
 		log_init.PrintAndLog("Comando no reconocido: ", strings.TrimSpace(line))
 	}
